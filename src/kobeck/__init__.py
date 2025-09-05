@@ -48,13 +48,18 @@ class GetRequest(AuthenticatedRequest):
     since: datetime | None = None
 
 
-class Action(BaseModel):
+class ExistingItemAction(BaseModel):
     action: str
     item_id: str
 
 
+class NewItemAction(BaseModel):
+    action: str
+    url: HttpUrl
+
+
 class SendRequest(AuthenticatedRequest):
-    actions: list[Action]
+    actions: list[ExistingItemAction | NewItemAction]
 
 
 class DownloadRequest(AuthenticatedRequest):
@@ -182,6 +187,9 @@ async def send(req: SendRequest, readeck: ReadeckDep):
                 action_results.append(True)
             case "delete":
                 await readeck.bookmark_update(action.item_id, is_deleted=True)
+                action_results.append(True)
+            case "add":
+                await readeck.bookmark_create(str(action.url))
                 action_results.append(True)
             case _:
                 action_results.append(False)

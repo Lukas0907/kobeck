@@ -156,3 +156,8 @@ class Readeck:
         async with self.get_client() as client:
             r = await client.patch(f"{self.url}/api/bookmarks/{id}", json=kwargs)
             r.raise_for_status()
+
+    async def bookmark_create(self, url: str) -> None:
+        async with self.get_client() as client:
+            r = await client.post(f"{self.url}/api/bookmarks", json={"url": url})
+            r.raise_for_status()
