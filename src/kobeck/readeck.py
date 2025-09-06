@@ -155,6 +155,9 @@ class Readeck:
     async def bookmark_update(self, id: str, **kwargs) -> None:
         async with self.get_client() as client:
             r = await client.patch(f"{self.url}/api/bookmarks/{id}", json=kwargs)
+            # Ignore missing (already deleted) articles.
+            if r.status_code == 404:
+                return
             r.raise_for_status()
 
     async def bookmark_create(self, url: str) -> None:
