@@ -27,7 +27,7 @@ def init_app():
 
 
 @app.middleware("http")
-async def add_process_time_header(request: Request, call_next: Any):
+async def log_request_body(request: Request, call_next: Any):
     body = await request.body()
     logger.info(body)
     return await call_next(request)
