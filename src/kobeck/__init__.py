@@ -155,7 +155,7 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
     soup = BeautifulSoup(article, features="html.parser")
     images = {}
     for i, img in enumerate(soup.find_all("img")):
-        if "src" in img:
+        if img.has_attr("src"):
             images[str(i)] = {"image_id": str(i), "item_id": str(i), "src": img["src"]}
             img.replace_with(Comment(f"IMG_{i}"))
         else:
