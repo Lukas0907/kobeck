@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     readeck_url: str
+    convert_to_jpeg: bool = False
 
 
 settings = Settings()
@@ -184,7 +185,11 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
     images = {}
     for i, img in enumerate(soup.find_all("img")):
         if img.has_attr("src"):
-            images[str(i)] = {"image_id": str(i), "item_id": str(i), "src": img["src"]}
+            src = img["src"]
+            if not src.endswith(".jpg") and settings.convert_to_jpeg:
+                src = f"https://pocket-image-cache.com//filters:format(jpg)/{src}"
+
+            images[str(i)] = {"image_id": str(i), "item_id": str(i), "src": src}
             img.replace_with(Comment(f"IMG_{i}"))
         else:
             img.decompose()
