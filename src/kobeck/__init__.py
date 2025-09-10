@@ -24,7 +24,9 @@ app = FastAPI()
 
 @app.on_event("startup")
 def init_app():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s(%(name)s):\t%(message)s"
+    )
 
 
 @app.middleware("http")
