@@ -2,6 +2,10 @@
 
 Kobo has a native client for Instapaper which can be used to connect to your own Readeck instance.
 
+## Requirements
+
+- Readeck version &ge; 0.20.0
+
 ## Readeck access token
 
 Generate a Readeck API token and run the following script to encrypt the Readeck token for the Kobo settings file:
