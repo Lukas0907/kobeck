@@ -1,8 +1,13 @@
 from datetime import datetime
 from typing import Annotated, Any
+import functools
 import itertools
+import json
 import logging
+import re
+import uuid
 from urllib.parse import unquote_plus
+from contextvars import ContextVar
 
 from bs4 import BeautifulSoup, Comment
 from fastapi import FastAPI, Depends, Form, HTTPException, Request
@@ -10,8 +15,35 @@ from pydantic import BaseModel, HttpUrl
 from pydantic_settings import BaseSettings
 
 from kobeck.readeck import Readeck
+from kobeck.logging_utils import sanitize_sensitive_data
 
 logger = logging.getLogger(__name__)
+
+# Context variable to store current request data for error logging
+current_request: ContextVar[dict] = ContextVar("current_request", default=None)
+
+
+def dump_on_error(func):
+    """Decorator to capture full request/response context on errors."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            request_data = current_request.get()
+            if request_data:
+                error_dump = {
+                    "error": True,
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "request": sanitize_sensitive_data(request_data),
+                    "endpoint": func.__name__,
+                }
+                logger.error("ERROR_DUMP: %s", json.dumps(error_dump, indent=2))
+            raise
+
+    return wrapper
 
 
 class Settings(BaseSettings):
@@ -30,9 +62,23 @@ def init_app():
 
 
 @app.middleware("http")
-async def log_request_body(request: Request, call_next: Any):
+async def capture_request_context(request: Request, call_next: Any):
+    """Simple middleware to capture request context for error dumping."""
+    correlation_id = str(uuid.uuid4())
     body = await request.body()
-    logger.info(body)
+
+    request_data = {
+        "correlation_id": correlation_id,
+        "method": request.method,
+        "url": str(request.url),
+        "headers": dict(request.headers),
+        "body": body.decode("utf-8", errors="replace") if body else None,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    # Store in context variable for decorator access
+    current_request.set(request_data)
+
     return await call_next(request)
 
 
@@ -83,6 +129,7 @@ ReadeckDep = Annotated[Readeck, Depends(get_readeck)]
 
 
 @app.post("/api/kobo/get")
+@dump_on_error
 async def get(req: GetRequest, readeck: ReadeckDep):
     """Get updated and deleted articles since a given timestamp."""
     bsyncs = await readeck.bookmarks_sync(since=req.since)
@@ -145,6 +192,7 @@ async def get(req: GetRequest, readeck: ReadeckDep):
 
 
 @app.post("/api/kobo/download")
+@dump_on_error
 async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep):
     """Download an article."""
     # Build the list of subdomains making up a bookmark URL
@@ -198,6 +246,7 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
 
 
 @app.post("/api/kobo/send")
+@dump_on_error
 async def send(req: SendRequest, readeck: ReadeckDep):
     """Modify article state."""
     action_results = []

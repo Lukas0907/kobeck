@@ -10,10 +10,44 @@ translation to Instapaper's expectations.
 from collections.abc import AsyncIterator
 from typing import Literal
 from datetime import datetime, UTC
+import functools
+import json
+import logging
 
 import httpx
 from pydantic import BaseModel, HttpUrl
 from requests.utils import parse_header_links
+
+from kobeck.logging_utils import sanitize_sensitive_data
+
+logger = logging.getLogger(__name__)
+
+
+async def log_readeck_response(response):
+    """httpx event hook to log API errors with full request/response context."""
+    if response.status_code >= 400:
+        # Read response body safely
+        try:
+            await response.aread()
+            body_text = response.text
+        except Exception:
+            body_text = "<unable to read response body>"
+
+        error_info = {
+            "readeck_request": {
+                "method": response.request.method,
+                "url": str(response.request.url),
+                "headers": sanitize_sensitive_data(dict(response.request.headers)),
+            },
+            "readeck_response": {
+                "status_code": response.status_code,
+                "headers": sanitize_sensitive_data(dict(response.headers)),
+                "body": body_text[:1000] + "..."
+                if len(body_text) > 1000
+                else body_text,
+            },
+        }
+        logger.error("READECK_API_ERROR: %s", json.dumps(error_info, indent=2))
 
 
 class BookmarkSync(BaseModel):
@@ -88,7 +122,9 @@ class Readeck:
         return {"Authorization": f"Bearer {self.token}"}
 
     def get_client(self):
-        return httpx.AsyncClient(headers=self.get_headers())
+        return httpx.AsyncClient(
+            headers=self.get_headers(), event_hooks={"response": [log_readeck_response]}
+        )
 
     async def bookmarks_sync(self, since: datetime | None = None) -> list[BookmarkSync]:
         async with self.get_client() as client:
