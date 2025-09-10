@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated, Any
 import itertools
 import logging
+from urllib.parse import unquote_plus
 
 from bs4 import BeautifulSoup, Comment
 from fastapi import FastAPI, Depends, Form, HTTPException, Request
@@ -152,17 +153,21 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
         candidate = ".".join(parts)
         sites_to_try.append(candidate)
 
+    requested_url = unquote_plus(str(req.url))
     article = None
     bookmark_found = None
 
+    logger.debug("Looking for bookmark URL %s", requested_url)
     for site in sites_to_try:
         try:
             logger.debug("Searching Readeck bookmarks for site %s", site)
             async for bookmark in readeck.bookmarks(site=site):
-                if bookmark.url == req.url:
+                bookmark_url = unquote_plus(str(bookmark.url))
+                if bookmark_url == requested_url:
                     bookmark_found = bookmark
                     logger.debug("Match found with bookmark %s", bookmark)
                     break
+                logger.debug("Ignoring mismatched bookmark URL: ", bookmark_url)
             if bookmark_found:
                 break
         except Exception:
