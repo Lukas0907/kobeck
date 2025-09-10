@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated, Any
 import itertools
 import logging
+from urllib.parse import unquote_plus
 
 from bs4 import BeautifulSoup, Comment
 from fastapi import FastAPI, Depends, Form, HTTPException, Request
@@ -144,10 +145,37 @@ async def get(req: GetRequest, readeck: ReadeckDep):
 @app.post("/api/kobo/download")
 async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep):
     """Download an article."""
-    async for bookmark in readeck.bookmarks(site=req.url.host):
-        if bookmark.url == req.url:
-            article = await readeck.bookmark_article(bookmark.id)
-            break
+    # Build the list of subdomains making up a bookmark URL
+    sites_to_try = [req.url.host]
+    parts = req.url.host.split(".")
+    while len(parts) > 2:
+        parts.pop(0)  # Remove leftmost subdomain
+        candidate = ".".join(parts)
+        sites_to_try.append(candidate)
+
+    requested_url = unquote_plus(str(req.url))
+    article = None
+    bookmark_found = None
+
+    logger.debug("Looking for bookmark URL %s", requested_url)
+    for site in sites_to_try:
+        try:
+            logger.debug("Searching Readeck bookmarks for site %s", site)
+            async for bookmark in readeck.bookmarks(site=site):
+                bookmark_url = unquote_plus(str(bookmark.url))
+                if bookmark_url == requested_url:
+                    bookmark_found = bookmark
+                    logger.debug("Match found with bookmark %s", bookmark)
+                    break
+                logger.debug("Ignoring mismatched bookmark URL: ", bookmark_url)
+            if bookmark_found:
+                break
+        except Exception:
+            logger.error("Error searching Readeck bookmarks for site %s", site)
+            continue
+
+    if bookmark_found:
+        article = await readeck.bookmark_article(bookmark_found.id)
     else:
         raise HTTPException(status_code=404, detail="Article not found")
 
