@@ -1,7 +1,15 @@
+"""Readeck API client and data models.
+
+Data structures based on Readeck v0.20.0 API specification:
+https://codeberg.org/readeck/readeck/src/tag/0.20.0/internal/bookmarks/dataset/bookmarks.go
+
+Note that they are partial and only cover what is of interest for the
+translation to Instapaper's expectations.
+"""
+
 from collections.abc import AsyncIterator
 from typing import Literal
 from datetime import datetime, UTC
-import re
 
 import httpx
 from pydantic import BaseModel, HttpUrl
@@ -10,7 +18,7 @@ from requests.utils import parse_header_links
 
 class BookmarkSync(BaseModel):
     id: str
-    time: str
+    time: datetime
     type: Literal["update"] | Literal["delete"]
 
 
@@ -57,7 +65,7 @@ class Bookmark(BaseModel):
     type: str
     updated: datetime
     url: HttpUrl
-    word_count: int
+    word_count: int | None = None
 
 
 def get_next_header_link(headers: httpx.Headers) -> str | None:
@@ -92,7 +100,7 @@ class Readeck:
             r.raise_for_status()
             return [BookmarkSync(**entry) for entry in r.json()]
 
-    async def bookmarks(self, site: str) -> AsyncIterator[BookmarkSync]:
+    async def bookmarks(self, site: str) -> AsyncIterator[Bookmark]:
         async with self.get_client() as client:
             next_url = f"{self.url}/api/bookmarks"
             while next_url:
