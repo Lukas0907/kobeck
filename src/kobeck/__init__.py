@@ -236,7 +236,11 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
     for i, img in enumerate(soup.find_all("img")):
         if img.has_attr("src"):
             src = img["src"]
-            if not src.endswith(".jpg") and settings.convert_to_jpeg:
+            if (
+                not src.endswith(".jpg")
+                and not src.endswith(".jpeg")
+                and settings.convert_to_jpeg
+            ):
                 src = f"https://pocket-image-cache.com//filters:format(jpg)/{src}"
 
             images[str(i)] = {"image_id": str(i), "item_id": str(i), "src": src}
