@@ -10,7 +10,6 @@ translation to Instapaper's expectations.
 from collections.abc import AsyncIterator
 from typing import Literal
 from datetime import datetime, UTC
-import functools
 import json
 import logging
 

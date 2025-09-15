@@ -4,7 +4,6 @@ import functools
 import itertools
 import json
 import logging
-import re
 import uuid
 from contextvars import ContextVar
 from urllib.parse import unquote_plus
