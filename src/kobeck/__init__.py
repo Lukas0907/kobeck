@@ -2,16 +2,20 @@ from datetime import datetime
 from typing import Annotated, Any
 import functools
 import itertools
+import io
 import json
 import logging
 import uuid
 from contextvars import ContextVar
-from urllib.parse import unquote_plus
+from urllib.parse import quote, unquote_plus
 
 from bs4 import BeautifulSoup, Comment
 from fastapi import FastAPI, Depends, Form, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, HttpUrl
 from pydantic_settings import BaseSettings
+from PIL import Image, ImageDraw, ImageFont
+import httpx
 
 from kobeck.readeck import Readeck
 from kobeck.logging_utils import sanitize_sensitive_data
@@ -47,11 +51,47 @@ def dump_on_error(func):
 
 class Settings(BaseSettings):
     readeck_url: str
-    convert_to_jpeg: bool = False
+    convert_to_jpeg: bool = True
 
 
 settings = Settings()
 app = FastAPI()
+
+
+def create_placeholder_image(message: str = "Image unavailable") -> bytes:
+    """Create a placeholder JPEG image with the given message."""
+    width, height = 800, 600
+    img = Image.new("RGB", (width, height), color="#ffffff")
+    draw = ImageDraw.Draw(img)
+
+    try:
+        font = ImageFont.load_default(size=36)
+    except Exception:
+        try:
+            # Fallback to default font
+            font = ImageFont.load_default()
+        except Exception:
+            font = None
+
+    # Calculate text position for centering
+    if font:
+        bbox = draw.textbbox((0, 0), message, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+    else:
+        # Rough estimation for built-in font (scaled up)
+        text_width = len(message) * 12
+        text_height = 22
+
+    x = (width - text_width) // 2
+    y = (height - text_height) // 2
+
+    draw.text((x, y), message, fill="#666666", font=font)
+
+    # Convert to JPEG bytes
+    img_buffer = io.BytesIO()
+    img.save(img_buffer, format="JPEG", quality=85)
+    return img_buffer.getvalue()
 
 
 @app.on_event("startup")
@@ -193,7 +233,9 @@ async def get(req: GetRequest, readeck: ReadeckDep):
 
 @app.post("/api/kobo/download")
 @dump_on_error
-async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep):
+async def download(
+    req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep, request: Request
+):
     """Download an article."""
     # Build the list of subdomains making up a bookmark URL
     sites_to_try = [req.url.host]
@@ -234,13 +276,21 @@ async def download(req: Annotated[DownloadRequest, Form()], readeck: ReadeckDep)
     images = {}
     for i, img in enumerate(soup.find_all("img")):
         if img.has_attr("src"):
-            src = img["src"]
+            src = original_src = img["src"]
             if (
                 not src.endswith(".jpg")
                 and not src.endswith(".jpeg")
                 and settings.convert_to_jpeg
             ):
-                src = f"https://pocket-image-cache.com//filters:format(jpg)/{src}"
+                # Build proper external URL using proxy headers
+                scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+                host = request.headers.get("host", request.url.netloc)
+                prefix = request.headers.get("x-forwarded-prefix", "").rstrip("/")
+
+                src = f"{scheme}://{host}{prefix}/api/convert-image?url={quote(original_src, safe='')}"
+                logger.info(
+                    "Replacing image URL for conversion: %s -> %s", original_src, src
+                )
 
             images[str(i)] = {"image_id": str(i), "item_id": str(i), "src": src}
             img.replace_with(Comment(f"IMG_{i}"))
@@ -282,3 +332,43 @@ async def send(req: SendRequest, readeck: ReadeckDep):
                 action_results.append(False)
 
     return {"status": all(action_results), "action_results": action_results}
+
+
+@app.get("/api/convert-image")
+async def convert_image(url: str):
+    """Convert an image to JPEG format.
+
+    Returns placeholder on failure.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            # Open the image with Pillow
+            img = Image.open(io.BytesIO(response.content))
+
+            # Convert to RGB if necessary (for PNG with transparency, etc.)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
+            # Convert to JPEG
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format="JPEG", quality=85)
+            jpeg_data = img_buffer.getvalue()
+
+            return Response(
+                content=jpeg_data,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
+    except Exception as e:
+        logger.error("Failed to convert image %s: %s", url, str(e))
+        # Return placeholder image on any failure
+        placeholder_data = create_placeholder_image("Image conversion failed")
+        return Response(
+            content=placeholder_data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
