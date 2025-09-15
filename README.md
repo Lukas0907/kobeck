@@ -1,10 +1,20 @@
-# Kobeck -- Readeck for Kobo
+# Kobeck – Readeck for Kobo
 
 Kobo has a native client for Instapaper which can be used to connect to your own Readeck instance.
 
 ## Requirements
 
 - Readeck version &ge; 0.20.0
+
+## Configuration
+
+Kobeck expects settings via environment variables.
+
+- `READECK_URL`: The URL of your Readeck instance, e.g. `https://readeck.example.com`.
+- `CONVERT_TO_JPEG`: Kobo actually seems to not support images except JPEGs. If this
+  setting is set to `1`, then articles will have their images rewritten to use the
+  **external** image service pocket-image-cache.com. Note that the service is operated
+  by a third party for use with Pocket and can (probably will) be shutdown at any time.
 
 ## Readeck access token
 
